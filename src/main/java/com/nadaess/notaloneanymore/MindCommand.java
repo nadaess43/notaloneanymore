@@ -1,6 +1,7 @@
 package com.nadaess.notaloneanymore;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.nadaess.notaloneanymore.util.DialogAgent;
@@ -20,6 +21,7 @@ public class MindCommand {
         LiteralArgumentBuilder<CommandSourceStack> mindCommand = Commands.literal("mind")
                 .requires(source -> true);
 
+        // Базовый рейкаст взгляда на жителя
         mindCommand.executes(context -> {
             if (!(context.getSource().getEntity() instanceof net.minecraft.server.level.ServerPlayer player)) return 0;
 
@@ -61,6 +63,7 @@ public class MindCommand {
             return 1;
         });
 
+        // Переключатель вывода мыслей в чат
         mindCommand.then(Commands.literal("toggle")
                 .executes(context -> {
                     Notaloneanymore.showThoughtsInChat = !Notaloneanymore.showThoughtsInChat;
@@ -70,6 +73,35 @@ public class MindCommand {
                 })
         );
 
+        // НАСТРОЙКА КОНФИГА ИЗ ИГРЫ ПРЯМЫМИ КОМАНДАМИ
+        mindCommand.then(Commands.literal("config")
+                .then(Commands.literal("apikey").then(Commands.argument("key", StringArgumentType.string()).executes(ctx -> {
+                    Notaloneanymore.config.apiKey = StringArgumentType.getString(ctx, "key");
+                    Notaloneanymore.config.save();
+                    ctx.getSource().sendSuccess(() -> Component.literal("§a[Config] API-ключ успешно обновлен и сохранен!"), true);
+                    return 1;
+                })))
+                .then(Commands.literal("apiurl").then(Commands.argument("url", StringArgumentType.string()).executes(ctx -> {
+                    Notaloneanymore.config.apiUrl = StringArgumentType.getString(ctx, "url");
+                    Notaloneanymore.config.save();
+                    ctx.getSource().sendSuccess(() -> Component.literal("§a[Config] API URL успешно изменен!"), true);
+                    return 1;
+                })))
+                .then(Commands.literal("apimodel").then(Commands.argument("model", StringArgumentType.string()).executes(ctx -> {
+                    Notaloneanymore.config.modelName = StringArgumentType.getString(ctx, "model");
+                    Notaloneanymore.config.save();
+                    ctx.getSource().sendSuccess(() -> Component.literal("§a[Config] Используемая модель изменена на: " + Notaloneanymore.config.modelName), true);
+                    return 1;
+                })))
+                .then(Commands.literal("apitemp").then(Commands.argument("temp", DoubleArgumentType.doubleArg(0.0, 1.0)).executes(ctx -> {
+                    Notaloneanymore.config.aiTemperature = DoubleArgumentType.getDouble(ctx, "temp");
+                    Notaloneanymore.config.save();
+                    ctx.getSource().sendSuccess(() -> Component.literal("§a[Config] Температура ИИ установлена на: " + Notaloneanymore.config.aiTemperature), true);
+                    return 1;
+                })))
+        );
+
+        // Генерация алиасов для чтения (read) и изменения (change/force)
         for (String readAlias : new String[]{"read", "re"}) {
             LiteralArgumentBuilder<CommandSourceStack> readNode = Commands.literal(readAlias);
             for (String memAlias : new String[]{"memory", "me"}) {

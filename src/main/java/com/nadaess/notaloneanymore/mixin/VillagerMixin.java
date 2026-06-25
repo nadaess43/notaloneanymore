@@ -105,6 +105,7 @@ public abstract class VillagerMixin implements DialogAgent {
             this.notAlone$chatHistory.clear();
         }
 
+        // Автономный цикл мышления (срабатывает, когда нет активного диалога)
         if (notAlone$isInActiveConversation || notAlone$dialogTicksLeft > 0) {
             notAlone$autonomousCooldown = 240;
         } else {
@@ -243,7 +244,7 @@ public abstract class VillagerMixin implements DialogAgent {
                             });
                         }
                     }
-                } else if (Notaloneanymore.showThoughtsInChat) {
+                } else if (Notaloneanymore.showThoughtsInChat) { // ПРОВЕРКА TOGGLE ИЗ КОММИТА
                     net.minecraft.network.chat.MutableComponent msg = net.minecraft.network.chat.Component.literal("§7[" + name + " думает]: §o" + thought);
                     for (ServerPlayer p : world.players()) {
                         if (p.distanceToSqr(villager) < 400.0) p.sendSystemMessage(msg);
@@ -391,8 +392,8 @@ public abstract class VillagerMixin implements DialogAgent {
     @Override @Unique public String notAlone$getLongTermMemory() { return this.notAlone$longTermMemory; }
     @Override @Unique public String notAlone$getRamMemory() { return this.notAlone$ramMemory; }
     @Override @Unique public void notAlone$updateRamMemory(String newRam) { this.notAlone$ramMemory = newRam; }
-    @Override @Unique public int notAlone$getInertia() { return this.notAlone$cognitiveInertia; }
-    @Override @Unique public void notAlone$setInertia(int value) { this.notAlone$cognitiveInertia = value; }
+    @Override public int notAlone$getInertia() { return this.notAlone$cognitiveInertia; }
+    @Override public void notAlone$setInertia(int value) { this.notAlone$cognitiveInertia = value; }
     @Override @Unique public Map<String, Integer> notAlone$getGenome() { return this.notAlone$genome; }
     @Override @Unique public void notAlone$setGene(String geneName, int value) { this.notAlone$genome.put(geneName, value); }
     @Override @Unique public Map<String, Integer> notAlone$getNeeds() { return this.notAlone$needs; }

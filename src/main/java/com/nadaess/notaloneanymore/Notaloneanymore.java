@@ -11,12 +11,14 @@ public class Notaloneanymore implements ModInitializer {
     public static final String MOD_ID = "notaloneanymore";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
     public static boolean showThoughtsInChat = true;
+    public static ModConfig config;
 
     @Override
     public void onInitialize() {
         LOGGER.info("Initializing Notaloneanymore ИИ-Модификации...");
-        loadConfig();
+        config = ModConfig.load();
 
+        // Сенсор разрушения блоков (Вандализм)
         net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.AFTER.register((world, player, pos, state, blockEntity) -> {
             if (!world.isClientSide()) {
                 String blockName = state.getBlock().getName().getString();
@@ -65,6 +67,7 @@ public class Notaloneanymore implements ModInitializer {
             }
         });
 
+        // Сенсор фиксации смерти сущностей рядом
         net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
             net.minecraft.world.level.Level world = entity.level();
             if (!world.isClientSide()) {
@@ -80,12 +83,9 @@ public class Notaloneanymore implements ModInitializer {
             }
         });
 
+        // Регистрация внутриигровых команд
         net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback.EVENT.register(
                 (dispatcher, registryAccess, environment) -> com.nadaess.notaloneanymore.MindCommand.register(dispatcher)
         );
-    }
-
-    private void loadConfig() {
-        LOGGER.info("Конфигурация ИИ успешно загружена.");
     }
 }

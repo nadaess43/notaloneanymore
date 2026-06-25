@@ -13,11 +13,15 @@ public class DeepSeekClient {
     private static final HttpClient CLIENT = HttpClient.newHttpClient();
 
     public static CompletableFuture<String> askAI(String systemPrompt, String userPrompt) {
-        ModConfig directConfig = new ModConfig();
+        // ВМЕСТО: ModConfig directConfig = new ModConfig();
+        // БЕРЕМ ИЗ СИНГЛТОНА МОДА:
+        ModConfig directConfig = Notaloneanymore.config;
+
         if (directConfig.apiKey.equals("YOUR_API_KEY_HERE") || directConfig.apiKey.isEmpty()) {
             Notaloneanymore.LOGGER.warn("Ключ API не установлен в конфиге!");
             return CompletableFuture.completedFuture("{\"thought\": \"[Ошибка: Нет API ключа в конфиге]\"}");
         }
+        // ... (весь остальной HTTP-код оставляем без изменений)
 
         JsonObject payload = new JsonObject();
         payload.addProperty("model", directConfig.modelName);
