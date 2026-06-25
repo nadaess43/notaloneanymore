@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.nadaess.notaloneanymore.DeepSeekClient;
 import com.nadaess.notaloneanymore.Notaloneanymore;
+import com.nadaess.notaloneanymore.util.DialogAgent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.PlayerChatMessage;
 import net.minecraft.server.level.ServerLevel;
@@ -23,9 +24,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-
-import com.nadaess.notaloneanymore.util.DialogAgent;
-
 
 @Mixin(net.minecraft.server.players.PlayerList.class)
 public abstract class ServerChatMixin {
@@ -51,7 +49,7 @@ public abstract class ServerChatMixin {
                     .min(Comparator.comparingDouble(v -> v.distanceToSqr(player)))
                     .get();
 
-            if (closestVillager instanceof com.nadaess.notaloneanymore.util.DialogAgent agent) {
+            if (closestVillager instanceof DialogAgent agent) {
                 agent.notAlone$startDialog(player.getUUID());
             }
 
@@ -88,14 +86,22 @@ public abstract class ServerChatMixin {
 
         String biome = world.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.BIOME).getKey(world.getBiome(closestVillager.blockPosition()).value()).getPath();
         String weather = world.isThundering() ? "гроза" : (world.isRaining() ? "дождь" : "ясно");
-        String timeString = ((world.getGameTime() % 24000) >= 13000) ? "ночь" : "день";
+
+        long gameTime = world.getLevelData().getGameTime() % 24000;
+        String timeString = (gameTime >= 13000) ? "ночь" : "день";
+
         String chatHistory = "Разговор начат.";
         String longTermMemory = "Ничего.";
+        StringBuilder genomePrompt = new StringBuilder();
+        StringBuilder needsPrompt = new StringBuilder();
 
-        if (closestVillager instanceof com.nadaess.notaloneanymore.util.DialogAgent agent) {
+        if (closestVillager instanceof DialogAgent agent) {
             chatHistory = agent.notAlone$getChatHistoryForPrompt();
             longTermMemory = agent.notAlone$getLongTermMemory();
             agent.notAlone$addMessageToHistory("Игрок " + player.getName().getString(), fullText);
+
+            agent.notAlone$getGenome().forEach((g, v) -> genomePrompt.append(g).append(": ").append(v).append("/100, "));
+            agent.notAlone$getNeeds().forEach((n, v) -> needsPrompt.append(n).append(": ").append(v).append("/100, "));
         }
 
         player.sendSystemMessage(Component.literal("§7[" + villagerName + " обдумывает твои слова... ]"));
@@ -103,19 +109,21 @@ public abstract class ServerChatMixin {
         String systemPrompt = String.format(
                 "Ты - разумный Житель в мире Minecraft по имени %s (%s).\n" +
                         "Окружение: биом %s, %s, погода %s.\n" +
-                        "ТВОЯ ДОЛГОСРОЧНАЯ ПАМЯТЬ: \"%s\". Ты ОБЯЗАН строго помнить её и опираться на неё! Если там написано, что игрок мародёр, преступник или враг — веди себя агрессивно, испуганно или обиженно!\n\n" +
+                        "ТВОЙ ПСИХОЛОГИЧЕСКИЙ ГЕНОМ: %s\n" +
+                        "ТВОИ ТЕКУЩИЕ ПОТРЕБНОСТИ: %s\n" +
+                        "ТВОЯ ДОЛГОСРОЧНАЯ ПАМЯТЬ: \"%s\". Ты ОБЯЗАН строго помнить её!\n\n" +
                         "Лог реплик текущей беседы:\n%s\n\n" +
                         "Игрок говорит тебе прямо сейчас: \"%s\".\n\n" +
                         "Ответь строго в формате JSON без markdown разметки:\n" +
                         "{\n" +
-                        "  \"say_to_player\": \"Твой живой вербальный ответ игроку персонажем вслух\",\n" +
-                        "  \"navigation\": \"none/go_to_target/follow/flee/work/home/wander\",\n" +
+                        "  \"say_to_player\": \"Твой живой ответ игроку\",\n" +
+                        "  \"navigation\": \"none/wander/work/home/flee/go_to_target/follow\",\n" +
                         "  \"target\": \"player/none\",\n" +
-                        "  \"animation\": \"none/jump_joy/panic/inspect\",\n" +
+                        "  \"animation\": \"none/jump_joy/panic/inspect/sleep/work/jump\",\n" +
                         "  \"emotion\": \"neutral/happy/sad/angry\",\n" +
-                        "  \"new_fact\": \"Дополни или перепиши память, ОБЯЗАТЕЛЬНО сохранив старые важные факты (особенно погромы)\"\n" +
+                        "  \"new_fact\": \"Дополни или перепиши долгосрочную память\"\n" +
                         "}",
-                villagerName, professionKey, biome, timeString, weather, longTermMemory, chatHistory, fullText
+                villagerName, professionKey, biome, timeString, weather, genomePrompt.toString(), needsPrompt.toString(), longTermMemory, chatHistory, fullText
         );
 
         DeepSeekClient.askAI(systemPrompt, fullText).thenAccept(response -> {
@@ -129,7 +137,7 @@ public abstract class ServerChatMixin {
                 if (json.has("say_to_player")) {
                     String cleanThought = json.get("say_to_player").getAsString();
 
-                    if (closestVillager instanceof com.nadaess.notaloneanymore.util.DialogAgent agent) {
+                    if (closestVillager instanceof DialogAgent agent) {
                         agent.notAlone$addMessageToHistory("Ты (" + villagerName + ")", cleanThought);
                     }
 
@@ -140,7 +148,7 @@ public abstract class ServerChatMixin {
                     String anim = json.has("animation") ? json.get("animation").getAsString() : "none";
                     String emo = json.has("emotion") ? json.get("emotion").getAsString() : "neutral";
 
-                    if (json.has("new_fact") && closestVillager instanceof com.nadaess.notaloneanymore.util.DialogAgent agent) {
+                    if (json.has("new_fact") && closestVillager instanceof DialogAgent agent) {
                         agent.notAlone$updateLongTermMemory(json.get("new_fact").getAsString());
                     }
 
@@ -159,7 +167,7 @@ public abstract class ServerChatMixin {
                     }
                 }
             } catch (Exception e) {
-                Notaloneanymore.LOGGER.error("Ошибка парсинга чата: " + e.getMessage());
+                Notaloneanymore.LOGGER.error("Ошибка парсинга чата: {}", e.getMessage());
             }
         });
     }
