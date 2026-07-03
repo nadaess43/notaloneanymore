@@ -74,20 +74,21 @@ public class MindCommand {
         );
 
         // НАСТРОЙКА КОНФИГА ИЗ ИГРЫ ПРЯМЫМИ КОМАНДАМИ
+        // Используем greedyString() чтобы принимались URL, ключи и модели с символами / : .
         mindCommand.then(Commands.literal("config")
-                .then(Commands.literal("apikey").then(Commands.argument("key", StringArgumentType.string()).executes(ctx -> {
+                .then(Commands.literal("apikey").then(Commands.argument("key", StringArgumentType.greedyString()).executes(ctx -> {
                     Notaloneanymore.config.apiKey = StringArgumentType.getString(ctx, "key");
                     Notaloneanymore.config.save();
                     ctx.getSource().sendSuccess(() -> Component.literal("§a[Config] API-ключ успешно обновлен и сохранен!"), true);
                     return 1;
                 })))
-                .then(Commands.literal("apiurl").then(Commands.argument("url", StringArgumentType.string()).executes(ctx -> {
+                .then(Commands.literal("apiurl").then(Commands.argument("url", StringArgumentType.greedyString()).executes(ctx -> {
                     Notaloneanymore.config.apiUrl = StringArgumentType.getString(ctx, "url");
                     Notaloneanymore.config.save();
                     ctx.getSource().sendSuccess(() -> Component.literal("§a[Config] API URL успешно изменен!"), true);
                     return 1;
                 })))
-                .then(Commands.literal("apimodel").then(Commands.argument("model", StringArgumentType.string()).executes(ctx -> {
+                .then(Commands.literal("apimodel").then(Commands.argument("model", StringArgumentType.greedyString()).executes(ctx -> {
                     Notaloneanymore.config.modelName = StringArgumentType.getString(ctx, "model");
                     Notaloneanymore.config.save();
                     ctx.getSource().sendSuccess(() -> Component.literal("§a[Config] Используемая модель изменена на: " + Notaloneanymore.config.modelName), true);
@@ -125,10 +126,10 @@ public class MindCommand {
         for (String changeAlias : new String[]{"change", "ch"}) {
             LiteralArgumentBuilder<CommandSourceStack> changeNode = Commands.literal(changeAlias);
             for (String statsAlias : new String[]{"stats", "st"}) {
-                changeNode.then(Commands.literal(statsAlias).then(Commands.argument("name", StringArgumentType.string()).then(Commands.argument("mod", StringArgumentType.string()).executes(ctx -> executeChange(ctx.getSource(), StringArgumentType.getString(ctx, "name"), StringArgumentType.getString(ctx, "mod"), "st")))));
+                changeNode.then(Commands.literal(statsAlias).then(Commands.argument("name", StringArgumentType.string()).then(Commands.argument("mod", StringArgumentType.greedyString()).executes(ctx -> executeChange(ctx.getSource(), StringArgumentType.getString(ctx, "name"), StringArgumentType.getString(ctx, "mod"), "st")))));
             }
             for (String needsAlias : new String[]{"needs", "ne"}) {
-                changeNode.then(Commands.literal(needsAlias).then(Commands.argument("name", StringArgumentType.string()).then(Commands.argument("mod", StringArgumentType.string()).executes(ctx -> executeChange(ctx.getSource(), StringArgumentType.getString(ctx, "name"), StringArgumentType.getString(ctx, "mod"), "ne")))));
+                changeNode.then(Commands.literal(needsAlias).then(Commands.argument("name", StringArgumentType.string()).then(Commands.argument("mod", StringArgumentType.greedyString()).executes(ctx -> executeChange(ctx.getSource(), StringArgumentType.getString(ctx, "name"), StringArgumentType.getString(ctx, "mod"), "ne")))));
             }
             for (String memAlias : new String[]{"memory", "me"}) {
                 changeNode.then(Commands.literal(memAlias).then(Commands.argument("name", StringArgumentType.string()).then(Commands.literal("clear").executes(ctx -> executeClearMemory(ctx.getSource(), StringArgumentType.getString(ctx, "name"))))));
@@ -142,10 +143,10 @@ public class MindCommand {
                 forceNode.then(Commands.literal(navAlias).then(Commands.argument("name", StringArgumentType.string()).then(Commands.argument("pos", Vec3Argument.vec3()).executes(ctx -> executeForceNav(ctx.getSource(), StringArgumentType.getString(ctx, "name"), Vec3Argument.getVec3(ctx, "pos"))))));
             }
             for (String actAlias : new String[]{"action", "ac"}) {
-                forceNode.then(Commands.literal(actAlias).then(Commands.argument("name", StringArgumentType.string()).then(Commands.argument("action", StringArgumentType.string()).executes(ctx -> executeForceAction(ctx.getSource(), StringArgumentType.getString(ctx, "name"), StringArgumentType.getString(ctx, "action"))))));
+                forceNode.then(Commands.literal(actAlias).then(Commands.argument("name", StringArgumentType.string()).then(Commands.argument("action", StringArgumentType.greedyString()).executes(ctx -> executeForceAction(ctx.getSource(), StringArgumentType.getString(ctx, "name"), StringArgumentType.getString(ctx, "action"))))));
             }
             for (String evtAlias : new String[]{"event", "ev"}) {
-                forceNode.then(Commands.literal(evtAlias).then(Commands.argument("name", StringArgumentType.string()).then(Commands.argument("event", StringArgumentType.string()).executes(ctx -> executeTriggerEvent(ctx.getSource(), StringArgumentType.getString(ctx, "name"), StringArgumentType.getString(ctx, "event"))))));
+                forceNode.then(Commands.literal(evtAlias).then(Commands.argument("name", StringArgumentType.string()).then(Commands.argument("event", StringArgumentType.greedyString()).executes(ctx -> executeTriggerEvent(ctx.getSource(), StringArgumentType.getString(ctx, "name"), StringArgumentType.getString(ctx, "event"))))));
             }
             mindCommand.then(forceNode);
         }
