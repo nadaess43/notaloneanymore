@@ -229,7 +229,9 @@ public class MindCommand {
     private static int executeForceNav(CommandSourceStack source, String name, Vec3 pos) {
         Villager villager = findVillagerByName(source, name);
         if (villager != null) {
+            // Прямой приказ навигатору физического тела
             villager.getNavigation().moveTo(pos.x, pos.y, pos.z, 0.6);
+
             source.sendSuccess(() -> Component.literal("§d[Кукловод] " + name + " направлен на " + pos), false);
             return 1;
         }
