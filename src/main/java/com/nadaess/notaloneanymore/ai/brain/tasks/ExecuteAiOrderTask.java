@@ -1,43 +1,36 @@
 package com.nadaess.notaloneanymore.ai.brain.tasks;
 
-import com.nadaess.notaloneanymore.ai.state.VillagerAiState;
+import com.nadaess.notaloneanymore.entity.CompanionAiState;
+import com.nadaess.notaloneanymore.entity.CompanionEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.npc.villager.Villager;
 
 import java.util.Map;
 import java.util.Queue;
 
 /**
- * Конвейер выполнения атомарных примитивов (Voyager-лайк).
- * Каждый тик: peek() → executePrimitiveTick() → если done → poll().
+ * РљРѕРЅРІРµР№РµСЂ РІС‹РїРѕР»РЅРµРЅРёСЏ Р°С‚РѕРјР°СЂРЅС‹С… РїСЂРёРјРёС‚РёРІРѕРІ (Voyager-Р»Р°Р№Рє) РґР»СЏ CompanionEntity.
+ * РљР°Р¶РґС‹Р№ С‚РёРє: peek() в†’ executePrimitiveTick() в†’ РµСЃР»Рё done в†’ poll().
  */
 public class ExecuteAiOrderTask {
 
-    public static void tickPhysicalMovement(ServerLevel level, Villager villager, VillagerAiState state) {
+    public static void tickPhysicalMovement(ServerLevel level, CompanionEntity companion, CompanionAiState state) {
         Queue<AtomicAction> queue = state.getActionQueue();
 
-        // Если пазлов нет — моб отдыхает
         if (queue.isEmpty()) {
             return;
         }
 
-        // Смотрим на текущий первый кусочек пазла, не удаляя его из очереди
         AtomicAction currentAction = queue.peek();
         if (currentAction == null) return;
 
-        // Выполняем тик этого примитива. Если он закончился -> возвращает true
-        boolean isPrimitiveDone = executePrimitiveTick(level, villager, state, currentAction);
+        boolean isPrimitiveDone = executePrimitiveTick(level, companion, state, currentAction);
 
         if (isPrimitiveDone) {
-            queue.poll(); // Кусочек выполнен, выкидываем его из очереди
-            state.setActionInitialized(false); // Сбрасываем флаг для следующего кусочка
+            queue.poll();
+            state.setActionInitialized(false);
         }
     }
-
-    // ========================================================================
-    // ВСПОМОГАТЕЛЬНЫЙ МЕТОД для безопасного чтения String из params
-    // ========================================================================
 
     private static String getStrParam(Map<String, Object> params, String key, String def) {
         if (params == null || !params.containsKey(key)) return def;
@@ -45,299 +38,268 @@ public class ExecuteAiOrderTask {
         return val != null ? val.toString() : def;
     }
 
-    // ========================================================================
-    // ЕЖЕТИКОВАЯ ЛОГИКА ПРИМИТИВОВ
-    // ========================================================================
-
-    private static boolean executePrimitiveTick(ServerLevel level, Villager villager, VillagerAiState state, AtomicAction action) {
+    private static boolean executePrimitiveTick(ServerLevel level, CompanionEntity companion, CompanionAiState state, AtomicAction action) {
         String name = action.action();
         Map<String, Object> p = action.params();
 
-        // Проверяем первый запуск примитива (нужно для старта навигации или таймеров)
         if (!state.isActionInitialized()) {
-            initPrimitive(villager, state, action);
+            initPrimitive(companion, state, action);
             state.setActionInitialized(true);
         }
 
-        // ====================================================================
-        // 1. ЛОКОМОЦИЯ
-        // ====================================================================
         switch (name) {
 
-            // --- wait ---
             case "wait" -> {
                 state.setActionTimer(state.getActionTimer() - 1);
                 return state.getActionTimer() <= 0;
             }
 
-            // --- walk_to ---
             case "walk_to" -> {
-                int x = action.getIntParam("x", villager.getBlockX());
-                int y = action.getIntParam("y", villager.getBlockY());
-                int z = action.getIntParam("z", villager.getBlockZ());
+                int x = action.getIntParam("x", companion.getBlockX());
+                int y = action.getIntParam("y", companion.getBlockY());
+                int z = action.getIntParam("z", companion.getBlockZ());
                 BlockPos target = new BlockPos(x, y, z);
-                if (!villager.getNavigation().isInProgress() || villager.blockPosition().closerThan(target, 1.5)) {
-                    villager.getNavigation().stop();
+                if (!companion.getNavigation().isInProgress() || companion.blockPosition().closerThan(target, 1.5)) {
+                    companion.getNavigation().stop();
                     return true;
                 }
                 return false;
             }
 
-            // --- step_forward ---
             case "step_forward" -> {
                 int n = Math.max(1, action.getIntParam("n", 1));
-                villager.setDeltaMovement(villager.getDeltaMovement().add(
-                        villager.getForward().scale(0.1 * n)));
+                companion.setDeltaMovement(companion.getDeltaMovement().add(
+                        companion.getForward().scale(0.1 * n)));
+                companion.hurtMarked = true;
                 return true;
             }
 
-            // --- step_back ---
             case "step_back" -> {
                 int n = Math.max(1, action.getIntParam("n", 1));
-                villager.setDeltaMovement(villager.getDeltaMovement().add(
-                        villager.getForward().scale(-0.1 * n)));
+                companion.setDeltaMovement(companion.getDeltaMovement().add(
+                        companion.getForward().scale(-0.1 * n)));
+                companion.hurtMarked = true;
                 return true;
             }
 
-            // --- strafe ---
             case "strafe" -> {
                 String dir = getStrParam(p, "dir", "left");
                 int n = Math.max(1, action.getIntParam("n", 1));
                 double side = dir.equalsIgnoreCase("right") ? 0.1 * n : -0.1 * n;
-                villager.setDeltaMovement(villager.getDeltaMovement().add(
-                        villager.getLookAngle().yRot(90).scale(side)));
+                companion.setDeltaMovement(companion.getDeltaMovement().add(
+                        companion.getLookAngle().yRot(90).scale(side)));
+                companion.hurtMarked = true;
                 return true;
             }
 
-            // --- stop_moving ---
             case "stop_moving" -> {
-                villager.getNavigation().stop();
-                villager.setDeltaMovement(0, villager.getDeltaMovement().y, 0);
+                companion.getNavigation().stop();
+                companion.setDeltaMovement(0, companion.getDeltaMovement().y, 0);
                 return true;
             }
 
-            // --- jump ---
             case "jump" -> {
-                if (villager.onGround()) {
-                    villager.getJumpControl().jump();
+                if (companion.onGround()) {
+                    companion.getJumpControl().jump();
                 }
                 return true;
             }
 
-            // --- toggle_sprint ---
             case "toggle_sprint" -> {
                 boolean sprint = action.getIntParam("value", 1) == 1;
-                villager.setSprinting(sprint);
+                companion.setSprinting(sprint);
                 return true;
             }
 
-            // --- toggle_sneak ---
             case "toggle_sneak" -> {
                 boolean sneak = action.getIntParam("value", 1) == 1;
-                villager.setShiftKeyDown(sneak);
+                companion.setShiftKeyDown(sneak);
                 return true;
             }
 
-            // --- toggle_swim ---
             case "toggle_swim" -> {
                 boolean swim = action.getIntParam("value", 1) == 1;
-                villager.setSwimming(swim);
+                companion.setSwimming(swim);
                 return true;
             }
 
-            // --- climb ---
             case "climb" -> {
                 String dir = getStrParam(p, "dir", "up");
                 double speed = dir.equalsIgnoreCase("down") ? -0.2 : 0.2;
-                villager.setDeltaMovement(villager.getDeltaMovement().x, speed, villager.getDeltaMovement().z);
+                companion.setDeltaMovement(companion.getDeltaMovement().x, speed, companion.getDeltaMovement().z);
+                companion.hurtMarked = true;
                 return true;
             }
 
-            // --- mount ---
             case "mount" -> {
-                // mount требует entity target — пока заглушка
                 return true;
             }
 
-            // --- dismount ---
             case "dismount" -> {
-                villager.stopRiding();
+                companion.stopRiding();
                 return true;
             }
 
-            // ====================================================================
-            // 2. ОРИЕНТАЦИЯ И ПОЗА
-            // ====================================================================
-
-            // --- turn_body_to ---
             case "turn_body_to" -> {
-                int x = action.getIntParam("x", villager.getBlockX());
-                int z = action.getIntParam("z", villager.getBlockZ());
-                double dx = x + 0.5 - villager.getX();
-                double dz = z + 0.5 - villager.getZ();
+                int x = action.getIntParam("x", companion.getBlockX());
+                int z = action.getIntParam("z", companion.getBlockZ());
+                double dx = x + 0.5 - companion.getX();
+                double dz = z + 0.5 - companion.getZ();
                 float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90;
-                villager.setYRot(yaw);
-                villager.setYHeadRot(yaw);
+                companion.setYRot(yaw);
+                companion.setYHeadRot(yaw);
                 return true;
             }
 
-            // --- look_at ---
             case "look_at" -> {
-                int x = action.getIntParam("x", villager.getBlockX());
-                int y = action.getIntParam("y", villager.getBlockY());
-                int z = action.getIntParam("z", villager.getBlockZ());
-                villager.getLookControl().setLookAt(x + 0.5, y + 0.5, z + 0.5, 10.0F, 10.0F);
+                int x = action.getIntParam("x", companion.getBlockX());
+                int y = action.getIntParam("y", companion.getBlockY());
+                int z = action.getIntParam("z", companion.getBlockZ());
+                companion.getLookControl().setLookAt(x + 0.5, y + 0.5, z + 0.5, 10.0F, 10.0F);
                 return true;
             }
 
-            // --- face_direction ---
             case "face_direction" -> {
                 String compass = getStrParam(p, "compass", "north");
                 float yaw = switch (compass.toLowerCase()) {
                     case "south" -> 180.0F;
                     case "east" -> 90.0F;
                     case "west" -> -90.0F;
-                    default -> 0.0F; // north
+                    default -> 0.0F;
                 };
-                villager.setYRot(yaw);
-                villager.setYHeadRot(yaw);
+                companion.setYRot(yaw);
+                companion.setYHeadRot(yaw);
                 return true;
             }
 
-            // --- sit / stand ---
             case "sit" -> {
-                villager.setPose(net.minecraft.world.entity.Pose.SITTING);
+                companion.setPose(net.minecraft.world.entity.Pose.SITTING);
                 return true;
             }
             case "stand" -> {
-                villager.setPose(net.minecraft.world.entity.Pose.STANDING);
+                companion.setPose(net.minecraft.world.entity.Pose.STANDING);
                 return true;
             }
 
-            // --- lie_down / get_up ---
             case "lie_down" -> {
-                villager.setPose(net.minecraft.world.entity.Pose.SLEEPING);
+                companion.setPose(net.minecraft.world.entity.Pose.SLEEPING);
                 return true;
             }
             case "get_up" -> {
-                villager.setPose(net.minecraft.world.entity.Pose.STANDING);
+                companion.setPose(net.minecraft.world.entity.Pose.STANDING);
                 return true;
             }
 
-            // --- crouch / uncrouch ---
             case "crouch" -> {
-                villager.setShiftKeyDown(true);
+                companion.setShiftKeyDown(true);
                 return true;
             }
             case "uncrouch" -> {
-                villager.setShiftKeyDown(false);
+                companion.setShiftKeyDown(false);
                 return true;
             }
 
-            // ====================================================================
-            // 3. БЛОКИ
-            // ====================================================================
-
-            // --- break_block ---
             case "break_block" -> {
-                int x = action.getIntParam("x", villager.getBlockX());
-                int y = action.getIntParam("y", villager.getBlockY());
-                int z = action.getIntParam("z", villager.getBlockZ());
+                int x = action.getIntParam("x", companion.getBlockX());
+                int y = action.getIntParam("y", companion.getBlockY());
+                int z = action.getIntParam("z", companion.getBlockZ());
                 BlockPos bp = new BlockPos(x, y, z);
                 if (level.getBlockState(bp).getDestroySpeed(level, bp) >= 0) {
-                    level.destroyBlock(bp, true, villager);
+                    level.destroyBlock(bp, true, companion);
                 }
                 return true;
             }
 
-            // --- place_block ---
             case "place_block" -> {
-                // place_block требует item в params — пока заглушка
                 return true;
             }
 
-            // --- use_block ---
             case "use_block" -> {
-                // use_block требует Player — пока заглушка
                 return true;
             }
 
-            // --- toggle_door ---
             case "toggle_door" -> {
-                // toggle_door требует Player — пока заглушка
+                int x = action.getIntParam("x", companion.getBlockX());
+                int y = action.getIntParam("y", companion.getBlockY());
+                int z = action.getIntParam("z", companion.getBlockZ());
+                BlockPos pos = new BlockPos(x, y, z);
+                net.minecraft.world.level.block.state.BlockState blockState = level.getBlockState(pos);
+                if (blockState.getBlock() instanceof net.minecraft.world.level.block.DoorBlock door) {
+                    boolean isOpen = blockState.getValue(net.minecraft.world.level.block.DoorBlock.OPEN);
+                    door.setOpen(companion, level, blockState, pos, !isOpen);
+                    companion.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+                }
                 return true;
             }
 
-            // --- pickup_item ---
             case "pickup_item" -> {
-                // pickup_item требует Player — пока заглушка
+                java.util.List<net.minecraft.world.entity.item.ItemEntity> items = level.getEntitiesOfClass(
+                    net.minecraft.world.entity.item.ItemEntity.class,
+                    companion.getBoundingBox().inflate(2.0)
+                );
+                if (!items.isEmpty()) {
+                    net.minecraft.world.entity.item.ItemEntity itemEntity = items.get(0);
+                    net.minecraft.world.item.ItemStack stack = itemEntity.getItem();
+                    // Р”РѕР±Р°РІР»СЏРµРј РІ РёРЅРІРµРЅС‚Р°СЂСЊ РєРѕРјРїР°РЅСЊРѕРЅР° (8 СЃР»РѕС‚РѕРІ)
+                    companion.getInventory().addItem(stack);
+                    companion.take(itemEntity, stack.getCount());
+                    itemEntity.discard();
+                    companion.playSound(net.minecraft.sounds.SoundEvents.ITEM_PICKUP, 1.0F, 1.0F);
+                }
                 return true;
             }
 
-            // ====================================================================
-            // 4. СУЩНОСТИ
-            // ====================================================================
-
-            // --- hit_entity ---
             case "hit_entity" -> {
                 if (state.getTargetEntity() != null) {
-                    villager.doHurtTarget(level, state.getTargetEntity());
+                    companion.doHurtTarget(level, state.getTargetEntity());
                 }
                 return true;
             }
 
-            // --- give_item ---
             case "give_item" -> {
-                // give_item требует item/count — пока заглушка
                 return true;
             }
 
-            // --- take_item ---
             case "take_item" -> {
-                // take_item требует item/count — пока заглушка
                 return true;
             }
 
-            // --- pet ---
             case "pet" -> {
                 if (state.getTargetEntity() != null) {
-                    level.broadcastEntityEvent(villager, (byte) 15);
+                    level.broadcastEntityEvent(companion, (byte) 15);
                 }
                 return true;
             }
 
-            // --- hug / kiss ---
             case "hug" -> {
                 if (state.getTargetEntity() != null) {
-                    villager.lookAt(state.getTargetEntity(), 90.0F, 90.0F);
-                    level.broadcastEntityEvent(villager, (byte) 15);
+                    companion.lookAt(state.getTargetEntity(), 90.0F, 90.0F);
+                    level.broadcastEntityEvent(companion, (byte) 15);
                 }
                 return true;
             }
             case "kiss" -> {
                 if (state.getTargetEntity() != null) {
-                    villager.lookAt(state.getTargetEntity(), 90.0F, 90.0F);
-                    level.broadcastEntityEvent(villager, (byte) 15);
+                    companion.lookAt(state.getTargetEntity(), 90.0F, 90.0F);
+                    level.broadcastEntityEvent(companion, (byte) 15);
                 }
                 return true;
             }
 
-            // --- push / pull ---
             case "push" -> {
                 if (state.getTargetEntity() != null) {
-                    state.getTargetEntity().push(villager);
+                    state.getTargetEntity().push(companion);
                 }
                 return true;
             }
             case "pull" -> {
                 if (state.getTargetEntity() != null) {
                     state.getTargetEntity().setDeltaMovement(
-                            villager.position().subtract(state.getTargetEntity().position()).scale(0.1));
+                            companion.position().subtract(state.getTargetEntity().position()).scale(0.1));
                 }
                 return true;
             }
 
-            // --- heal_entity ---
             case "heal_entity" -> {
                 if (state.getTargetEntity() != null) {
                     state.getTargetEntity().heal(4.0F);
@@ -345,56 +307,73 @@ public class ExecuteAiOrderTask {
                 return true;
             }
 
-            // ====================================================================
-            // 5. ИНВЕНТАРЬ
-            // ====================================================================
-
-            // --- equip ---
             case "equip" -> {
-                // equip требует item/slot — пока заглушка
-                return true;
-            }
-
-            // --- unequip ---
-            case "unequip" -> {
-                // unequip требует slot — пока заглушка
-                return true;
-            }
-
-            // --- drop_item ---
-            case "drop_item" -> {
-                int count = Math.max(1, action.getIntParam("count", 1));
-                for (int i = 0; i < count; i++) {
-                    villager.spawnAtLocation(level, villager.getMainHandItem().copy());
+                String itemId = getStrParam(p, "item", "minecraft:air");
+                String slot = getStrParam(p, "slot", "main_hand");
+                net.minecraft.world.item.Item item = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(
+                    net.minecraft.resources.Identifier.parse(itemId)).orElseThrow().value();
+                net.minecraft.world.item.ItemStack stack = new net.minecraft.world.item.ItemStack(item);
+                if (slot.equals("main_hand")) {
+                    companion.setItemSlot(net.minecraft.world.entity.EquipmentSlot.MAINHAND, stack);
+                } else if (slot.equals("off_hand")) {
+                    companion.setItemSlot(net.minecraft.world.entity.EquipmentSlot.OFFHAND, stack);
+                } else if (slot.equals("head")) {
+                    companion.setItemSlot(net.minecraft.world.entity.EquipmentSlot.HEAD, stack);
+                } else if (slot.equals("chest")) {
+                    companion.setItemSlot(net.minecraft.world.entity.EquipmentSlot.CHEST, stack);
+                } else if (slot.equals("legs")) {
+                    companion.setItemSlot(net.minecraft.world.entity.EquipmentSlot.LEGS, stack);
+                } else if (slot.equals("feet")) {
+                    companion.setItemSlot(net.minecraft.world.entity.EquipmentSlot.FEET, stack);
                 }
-                villager.getMainHandItem().shrink(count);
                 return true;
             }
 
-            // --- store_item / retrieve_item ---
+            case "unequip" -> {
+                String slot = getStrParam(p, "slot", "main_hand");
+                net.minecraft.world.entity.EquipmentSlot eqSlot = switch (slot) {
+                    case "off_hand" -> net.minecraft.world.entity.EquipmentSlot.OFFHAND;
+                    case "head" -> net.minecraft.world.entity.EquipmentSlot.HEAD;
+                    case "chest" -> net.minecraft.world.entity.EquipmentSlot.CHEST;
+                    case "legs" -> net.minecraft.world.entity.EquipmentSlot.LEGS;
+                    case "feet" -> net.minecraft.world.entity.EquipmentSlot.FEET;
+                    default -> net.minecraft.world.entity.EquipmentSlot.MAINHAND;
+                };
+                companion.setItemSlot(eqSlot, net.minecraft.world.item.ItemStack.EMPTY);
+                return true;
+            }
+
+            case "drop_item" -> {
+                String itemId = getStrParam(p, "item", "minecraft:wheat");
+                int count = Math.max(1, action.getIntParam("count", 1));
+                net.minecraft.world.item.Item item = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(
+                    net.minecraft.resources.Identifier.parse(itemId)).orElseThrow().value();
+                net.minecraft.world.item.ItemStack stack = new net.minecraft.world.item.ItemStack(item, count);
+                net.minecraft.world.entity.item.ItemEntity drop = new net.minecraft.world.entity.item.ItemEntity(
+                    level, companion.getX(), companion.getY() + 1.0, companion.getZ(), stack);
+                drop.setDeltaMovement(companion.getLookAngle().scale(0.3));
+                level.addFreshEntity(drop);
+                if (companion.getMainHandItem().is(item)) {
+                    companion.setItemSlot(net.minecraft.world.entity.EquipmentSlot.MAINHAND, net.minecraft.world.item.ItemStack.EMPTY);
+                }
+                return true;
+            }
+
             case "store_item" -> {
-                // store_item требует item/count/container — пока заглушка
                 return true;
             }
             case "retrieve_item" -> {
-                // retrieve_item требует item/count/container — пока заглушка
                 return true;
             }
 
-            // --- swap_hand ---
             case "swap_hand" -> {
-                net.minecraft.world.item.ItemStack main = villager.getMainHandItem();
-                net.minecraft.world.item.ItemStack off = villager.getOffhandItem();
-                villager.setItemSlot(net.minecraft.world.entity.EquipmentSlot.MAINHAND, off);
-                villager.setItemSlot(net.minecraft.world.entity.EquipmentSlot.OFFHAND, main);
+                net.minecraft.world.item.ItemStack main = companion.getMainHandItem();
+                net.minecraft.world.item.ItemStack off = companion.getOffhandItem();
+                companion.setItemSlot(net.minecraft.world.entity.EquipmentSlot.MAINHAND, off);
+                companion.setItemSlot(net.minecraft.world.entity.EquipmentSlot.OFFHAND, main);
                 return true;
             }
 
-            // ====================================================================
-            // 6. РЕЧЬ
-            // ====================================================================
-
-            // --- say ---
             case "say" -> {
                 String text = getStrParam(p, "text", "...");
                 level.getServer().getPlayerList().broadcastSystemMessage(
@@ -402,69 +381,55 @@ public class ExecuteAiOrderTask {
                 return true;
             }
 
-            // --- speak_to ---
             case "speak_to" -> {
                 String text = getStrParam(p, "text", "...");
                 level.getServer().getPlayerList().broadcastSystemMessage(
-                        net.minecraft.network.chat.Component.literal("§e[говорит] §f" + text), false);
+                        net.minecraft.network.chat.Component.literal("В§e[РіРѕРІРѕСЂРёС‚] В§f" + text), false);
                 return true;
             }
 
-            // --- greet ---
             case "greet" -> {
                 level.getServer().getPlayerList().broadcastSystemMessage(
-                        net.minecraft.network.chat.Component.literal("§eПриветствую!"), false);
+                        net.minecraft.network.chat.Component.literal("В§eРџСЂРёРІРµС‚СЃС‚РІСѓСЋ!"), false);
                 return true;
             }
 
-            // --- ask ---
             case "ask" -> {
                 String topic = getStrParam(p, "topic", "...");
                 level.getServer().getPlayerList().broadcastSystemMessage(
-                        net.minecraft.network.chat.Component.literal("§e[спрашивает] §f" + topic), false);
+                        net.minecraft.network.chat.Component.literal("В§e[СЃРїСЂР°С€РёРІР°РµС‚] В§f" + topic), false);
                 return true;
             }
 
-            // --- exclaim ---
             case "exclaim" -> {
-                String text = getStrParam(p, "text", "Эй!");
+                String text = getStrParam(p, "text", "Р­Р№!");
                 level.getServer().getPlayerList().broadcastSystemMessage(
-                        net.minecraft.network.chat.Component.literal("§6" + text), false);
+                        net.minecraft.network.chat.Component.literal("В§6" + text), false);
                 return true;
             }
 
-            // --- shout ---
             case "shout" -> {
-                String text = getStrParam(p, "text", "АУ!");
+                String text = getStrParam(p, "text", "РђРЈ!");
                 for (net.minecraft.server.level.ServerPlayer pl : level.players()) {
-                    if (pl.distanceToSqr(villager) < 400.0) {
+                    if (pl.distanceToSqr(companion) < 400.0) {
                         pl.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                                "§c[крик] " + villager.getName().getString() + ": " + text));
+                                "В§c[РєСЂРёРє] " + companion.getName().getString() + ": " + text));
                     }
                 }
                 return true;
             }
 
-            // --- whisper ---
             case "whisper" -> {
                 String text = getStrParam(p, "text", "...");
                 level.getServer().getPlayerList().broadcastSystemMessage(
-                        net.minecraft.network.chat.Component.literal("§7[шёпот] §f" + text), false);
+                        net.minecraft.network.chat.Component.literal("В§7[С€С‘РїРѕС‚] В§f" + text), false);
                 return true;
             }
-
-            // ====================================================================
-            // 7. ВОСПРИЯТИЕ (сенсоры — заглушки)
-            // ====================================================================
 
             case "glance" -> { return true; }
             case "request_screenshot" -> { return true; }
             case "listen" -> { return true; }
             case "scan_area" -> { return true; }
-
-            // ====================================================================
-            // 8. ВНУТРЕННИЕ/КОГНИТИВНЫЕ
-            // ====================================================================
 
             case "recall" -> { return true; }
             case "adjust_opinion" -> { return true; }
@@ -472,49 +437,46 @@ public class ExecuteAiOrderTask {
             case "set_goal" -> { return true; }
             case "log_thought" -> {
                 String text = getStrParam(p, "text", "...");
-                state.addMessageToHistory("мысль", text);
+                state.addMessageToHistory("РјС‹СЃР»СЊ", text);
                 return true;
             }
             case "decide_lie" -> { return true; }
             case "forget" -> { return true; }
 
-            // ====================================================================
-            // 9. ЭМОЦИИ И АНИМАЦИИ ТЕЛА
-            // ====================================================================
-
             case "nod" -> {
-                villager.setYHeadRot(villager.getYHeadRot() + 15);
+                companion.setYHeadRot(companion.getYHeadRot() + 15);
                 return true;
             }
             case "shake_head" -> {
-                villager.setYHeadRot(villager.getYHeadRot() - 15);
+                companion.setYHeadRot(companion.getYHeadRot() - 15);
                 return true;
             }
             case "shrug" -> {
-                level.broadcastEntityEvent(villager, (byte) 15);
+                level.broadcastEntityEvent(companion, (byte) 15);
                 return true;
             }
             case "flinch" -> {
-                villager.hurt(level.damageSources().generic(), 0.01F);
+                companion.hurt(level.damageSources().generic(), 0.01F);
                 return true;
             }
             case "laugh" -> {
-                level.broadcastEntityEvent(villager, (byte) 15);
+                level.broadcastEntityEvent(companion, (byte) 15);
                 return true;
             }
             case "cry" -> {
-                level.broadcastEntityEvent(villager, (byte) 15);
+                level.broadcastEntityEvent(companion, (byte) 15);
                 return true;
             }
             case "tremble" -> {
-                villager.setDeltaMovement(
-                        (villager.getRandom().nextDouble() - 0.5) * 0.1,
-                        villager.getDeltaMovement().y,
-                        (villager.getRandom().nextDouble() - 0.5) * 0.1);
+                companion.setDeltaMovement(
+                        (companion.getRandom().nextDouble() - 0.5) * 0.1,
+                        companion.getDeltaMovement().y,
+                        (companion.getRandom().nextDouble() - 0.5) * 0.1);
+                companion.hurtMarked = true;
                 return true;
             }
             case "facepalm" -> {
-                level.broadcastEntityEvent(villager, (byte) 15);
+                level.broadcastEntityEvent(companion, (byte) 15);
                 return true;
             }
             case "spawn_particles" -> {
@@ -526,35 +488,24 @@ public class ExecuteAiOrderTask {
                     default -> net.minecraft.core.particles.ParticleTypes.HAPPY_VILLAGER;
                 };
                 level.sendParticles(particle,
-                        villager.getX(), villager.getY() + 2, villager.getZ(),
+                        companion.getX(), companion.getY() + 1.0, companion.getZ(),
                         5, 0.3, 0.3, 0.3, 0);
                 return true;
             }
 
-            // ====================================================================
-            // 10. МЕТА-ДЕЙСТВИЯ
-            // ====================================================================
-
             case "idle" -> { return true; }
             case "cancel_current" -> {
-                villager.getNavigation().stop();
+                companion.getNavigation().stop();
                 state.setActionTimer(0);
                 return true;
             }
             case "repeat" -> { return true; }
 
-            // ====================================================================
-            // НЕИЗВЕСТНЫЙ ПРИМИТИВ
-            // ====================================================================
             default -> { return true; }
         }
     }
 
-    // ========================================================================
-    // ОДНОРАЗОВАЯ ИНИЦИАЛИЗАЦИЯ ПРИМИТИВА
-    // ========================================================================
-
-    private static void initPrimitive(Villager villager, VillagerAiState state, AtomicAction action) {
+    private static void initPrimitive(CompanionEntity companion, CompanionAiState state, AtomicAction action) {
         String name = action.action();
 
         switch (name) {
@@ -563,12 +514,13 @@ public class ExecuteAiOrderTask {
                 state.setActionTimer(ticks);
             }
             case "walk_to" -> {
-                int x = action.getIntParam("x", villager.getBlockX());
-                int y = action.getIntParam("y", villager.getBlockY());
-                int z = action.getIntParam("z", villager.getBlockZ());
-                villager.getNavigation().moveTo(x, y, z, 0.5);
+                int x = action.getIntParam("x", companion.getBlockX());
+                int y = action.getIntParam("y", companion.getBlockY());
+                int z = action.getIntParam("z", companion.getBlockZ());
+                companion.getNavigation().moveTo(x, y, z, 0.5);
             }
             default -> {}
         }
     }
 }
+

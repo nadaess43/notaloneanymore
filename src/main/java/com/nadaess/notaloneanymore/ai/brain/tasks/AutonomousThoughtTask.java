@@ -4,8 +4,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.nadaess.notaloneanymore.DeepSeekClient;
 import com.nadaess.notaloneanymore.Notaloneanymore;
-import com.nadaess.notaloneanymore.ai.state.VillagerAiState;
-import com.nadaess.notaloneanymore.util.DialogAgent;
+import com.nadaess.notaloneanymore.entity.CompanionAiState;
+import com.nadaess.notaloneanymore.entity.CompanionEntity;
+import com.nadaess.notaloneanymore.entity.CompanionAgent;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -13,77 +14,40 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Enemy;
-import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.phys.Vec3;
-import net.tslat.smartbrainlib.api.core.behaviour.base.ExtendedBehaviour;
 
 import java.util.List;
-import java.util.Set;
 
 /**
- * SBL-задача фонового автономного мышления жителя.
- * Каждые 240 тиков (12 секунд) вызывает DeepSeekClient.askAI(),
- * обрабатывает JSON-ответ и обновляет состояние (navState, animState, память).
+ * РђРІС‚РѕРЅРѕРјРЅРѕРµ РјС‹С€Р»РµРЅРёРµ РєРѕРјРїР°РЅСЊРѕРЅР°. Р—Р°РјРµРЅСЏРµС‚ Р»РѕРіРёРєСѓ РґР»СЏ Villager.
+ * РўРµРїРµСЂСЊ СЂР°Р±РѕС‚Р°РµС‚ СЃ CompanionEntity РЅР°РїСЂСЏРјСѓСЋ (Р±РµР· РјРёРєСЃРёРЅРѕРІ).
  */
-public class AutonomousThoughtTask extends ExtendedBehaviour<Villager> {
+public class AutonomousThoughtTask {
 
-    /**
-     * Интерфейс для доступа к {@link VillagerAiState} из SBL-задач.
-     * Реализуется в {@code VillagerMixin}.
-     */
-    public interface AiStateProvider {
-        VillagerAiState getAiState();
-    }
+    public static void tickCustomAi(ServerLevel level, CompanionEntity companion, CompanionAiState state) {
+        if (state == null) return;
 
-    public AutonomousThoughtTask() {
-        // Работаем без тайм-аута — таск активен постоянно
-        noTimeout();
-        // Стартуем сразу, без условий
-        startCondition(villager -> true);
-    }
-
-    @Override
-    protected void tick(ServerLevel level, Villager villager, long gameTime) {
-        if (!(villager instanceof AiStateProvider provider)) return;
-        VillagerAiState state = provider.getAiState();
-
-        // 1. ИНИЦИАЛИЗАЦИЯ ИНФРАСТРУКТУРЫ ДВИЖЕНИЯ
-        // Передаем управление в наш технический исполнитель каждый тик
-        ExecuteAiOrderTask.tickPhysicalMovement(level, villager, state);
-
-        // Инициализация генома при первом тике
         if (!state.isInitialized()) {
-            state.initDefaultStats(villager);
+            state.initDefaultStats(companion);
         }
 
-        // Обновление физиологических потребностей (раз в минуту)
-        if (villager.tickCount % 1200 == 0) {
+        if (companion.tickCount % 1200 == 0) {
             state.tickNeeds();
         }
 
-        // Кулдаун реактивных событий
         if (state.getReactiveCooldown() > 0) {
             state.setReactiveCooldown(state.getReactiveCooldown() - 1);
         }
 
-        // Обработка урона (реактивный триггер)
-        if (villager.hurtTime > 0 && villager.tickCount % 15 == 0) {
-            String attacker = villager.getLastHurtByMob() != null
-                    ? BuiltInRegistries.ENTITY_TYPE.getKey(villager.getLastHurtByMob().getType()).getPath()
-                    : "неизвестно";
+        if (companion.hurtTime > 0 && companion.tickCount % 15 == 0) {
+            String attacker = companion.getLastHurtByMob() != null
+                    ? BuiltInRegistries.ENTITY_TYPE.getKey(companion.getLastHurtByMob().getType()).getPath()
+                    : "РЅРµРёР·РІРµСЃС‚РЅРѕ";
             level.getServer().execute(() -> {
-                if (villager instanceof DialogAgent agent) {
-                    agent.notAlone$triggerReactiveEvent("DAMAGE", "Меня атаковали! Агрессор: " + attacker);
-                }
+                companion.companion$triggerReactiveEvent("DAMAGE", "РњРµРЅСЏ Р°С‚Р°РєРѕРІР°Р»Рё! РђРіСЂРµСЃСЃРѕСЂ: " + attacker);
             });
         }
 
-        // Логирование состояния навигации (раз в секунду)
-        if (villager.tickCount % 20 == 0 && !state.getNavState().equals("none")) {
-            // Можно добавить более детальное логирование при необходимости
-        }
-
-        // Автономный цикл мышления
         if (state.isInActiveConversation() || state.getDialogTicksLeft() > 0) {
             state.setAutonomousCooldown(240);
         } else {
@@ -91,16 +55,14 @@ public class AutonomousThoughtTask extends ExtendedBehaviour<Villager> {
             state.setAutonomousCooldown(cooldown);
             if (cooldown <= 0) {
                 state.setAutonomousCooldown(240);
-                triggerAutonomousThought(level, villager, state);
+                triggerAutonomousThought(level, companion, state);
             }
         }
 
-        // Таймер диалога
         if (state.getDialogTicksLeft() > 0) {
             state.setDialogTicksLeft(state.getDialogTicksLeft() - 1);
         }
 
-        // Сброс диалога при истечении таймера
         if (state.isInActiveConversation() && state.getDialogTicksLeft() <= 0) {
             state.setCurrentMaxDialogSeconds(25);
             state.setInActiveConversation(false);
@@ -109,19 +71,16 @@ public class AutonomousThoughtTask extends ExtendedBehaviour<Villager> {
         }
     }
 
-    /**
-     * Формирует снапшот окружения жителя.
-     */
-    private String buildEnvironmentSnapshot(Villager villager, ServerLevel world) {
-        Vec3 myPos = villager.position();
+    private static String buildEnvironmentSnapshot(CompanionEntity companion, ServerLevel world) {
+        Vec3 myPos = companion.position();
         List<LivingEntity> entities = world.getEntitiesOfClass(
-                LivingEntity.class, villager.getBoundingBox().inflate(15.0), e -> e != villager);
+                LivingEntity.class, companion.getBoundingBox().inflate(15.0), e -> e != companion);
         StringBuilder builder = new StringBuilder();
-        builder.append(String.format("Моя позиция: [X:%.1f, Y:%.1f, Z:%.1f]. ", myPos.x, myPos.y, myPos.z));
+        builder.append(String.format("РњРѕСЏ РїРѕР·РёС†РёСЏ: [X:%.1f, Y:%.1f, Z:%.1f]. ", myPos.x, myPos.y, myPos.z));
         if (entities.isEmpty()) {
-            builder.append("Рядом никого нет.");
+            builder.append("Р СЏРґРѕРј РЅРёРєРѕРіРѕ РЅРµС‚.");
         } else {
-            builder.append("Объекты рядом: ");
+            builder.append("РћР±СЉРµРєС‚С‹ СЂСЏРґРѕРј: ");
             for (LivingEntity entity : entities) {
                 String name = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).getPath();
                 if (entity instanceof net.minecraft.world.entity.player.Player) {
@@ -136,42 +95,37 @@ public class AutonomousThoughtTask extends ExtendedBehaviour<Villager> {
         return builder.toString();
     }
 
-    /**
-     * Запускает асинхронный вызов DeepSeek для автономного мышления.
-     */
-    private void triggerAutonomousThought(ServerLevel level, Villager villager, VillagerAiState state) {
-        String name = villager.getName().getString();
-        String profession = BuiltInRegistries.VILLAGER_PROFESSION
-                .getKey(villager.getVillagerData().profession().value()).getPath();
+    private static void triggerAutonomousThought(ServerLevel level, CompanionEntity companion, CompanionAiState state) {
+        String name = companion.hasCustomName() ? companion.getCustomName().getString() : "РљРѕРјРїР°РЅСЊРѕРЅ";
+        String role = "companion"; // РІСЂРµРјРµРЅРЅС‹Р№, РїРѕРєР° РЅРµС‚ РїСЂРѕС„РµСЃСЃРёР№ Hermes-СЃРєРёР»Р»РѕРІ
 
         long gameTime = level.getLevelData().getGameTime() % 24000;
-        String timeText = (gameTime < 13000) ? "день" : "ночь";
-        String weatherText = level.isRaining() ? "дождь" : "ясно";
-        String snapshot = buildEnvironmentSnapshot(villager, level);
+        String timeText = (gameTime < 13000) ? "РґРµРЅСЊ" : "РЅРѕС‡СЊ";
+        String weatherText = level.isRaining() ? "РґРѕР¶РґСЊ" : "СЏСЃРЅРѕ";
+        String snapshot = buildEnvironmentSnapshot(companion, level);
 
         StringBuilder genStr = new StringBuilder();
         state.getGenome().forEach((g, v) -> genStr.append(g).append(":").append(v).append(", "));
 
         String systemPrompt = String.format(
-                "Ты - игровой персонаж Житель %s (%s). Окружение: %s, %s. Снапшот мира: %s.\n" +
-                        "Твои гены: %s\n" +
-                        "Твоя память: \"%s\"\n" +
-                        "Верни валидный JSON:\n" +
+                "РўС‹ - РёРіСЂРѕРІРѕР№ РїРµСЂСЃРѕРЅР°Р¶ РљРѕРјРїР°РЅСЊРѕРЅ %s (%s). РћРєСЂСѓР¶РµРЅРёРµ: %s, %s. РЎРЅР°РїС€РѕС‚ РјРёСЂР°: %s.\n" +
+                        "РўРІРѕРё РіРµРЅС‹: %s\n" +
+                        "РўРІРѕСЏ РїР°РјСЏС‚СЊ: \"%s\"\n" +
+                        "Р’РµСЂРЅРё РІР°Р»РёРґРЅС‹Р№ JSON:\n" +
                         "{\n" +
-                        "  \"thought\": \"Краткая мысль\",\n" +
-                        "  \"say_to_player\": \"Фраза игроку вслух или 'none'\",\n" +
+                        "  \"thought\": \"РљСЂР°С‚РєР°СЏ РјС‹СЃР»СЊ\",\n" +
+                        "  \"say_to_player\": \"Р¤СЂР°Р·Р° РёРіСЂРѕРєСѓ РІСЃР»СѓС… РёР»Рё 'none'\",\n" +
                         "  \"navigation\": \"none/wander/work/home/flee/go_to_target/follow\",\n" +
-                        "  \"target\": \"имя_объекта_или_none\",\n" +
+                        "  \"target\": \"РёРјСЏ_РѕР±СЉРµРєС‚Р°_РёР»Рё_none\",\n" +
                         "  \"animation\": \"none/jump_joy/panic/inspect/sleep/work/jump\",\n" +
                         "  \"emotion\": \"neutral/happy/sad/angry\",\n" +
                         "  \"new_fact\": \"none\"\n" +
                         "}",
-                name, profession, timeText, weatherText, snapshot,
+                name, role, timeText, weatherText, snapshot,
                 genStr.toString(), state.getLongTermMemory()
         );
 
-        DeepSeekClient.askAI(systemPrompt, "[Фоновый цикл]").thenAccept(response -> {
-            // Используем серверный поток для безопасности
+        DeepSeekClient.askAI(systemPrompt, "[Р¤РѕРЅРѕРІС‹Р№ С†РёРєР»]").thenAccept(response -> {
             level.getServer().execute(() -> {
                 try {
                     if (!response.contains("{") || !response.contains("}")) return;
@@ -197,89 +151,89 @@ public class AutonomousThoughtTask extends ExtendedBehaviour<Villager> {
                     String finalNav = nav;
 
                     if (!sayToPlayer.equalsIgnoreCase("none") && !sayToPlayer.trim().isEmpty()) {
-                        Component msg = Component.literal("§e[" + name + " (" + profession + ")] §f" + sayToPlayer);
+                        Component msg = Component.literal("В§e[" + name + "] В§f" + sayToPlayer);
                         for (ServerPlayer p : level.players()) {
-                            if (p.distanceToSqr(villager) < 144.0) {
+                            if (p.distanceToSqr(companion) < 144.0) {
                                 p.sendSystemMessage(msg);
                                 state.startDialog(p.getUUID());
-                                state.addMessageToHistory("Ты (" + name + ")", sayToPlayer);
+                                state.addMessageToHistory("РўС‹ (" + name + ")", sayToPlayer);
                             }
                         }
                     } else if (Notaloneanymore.showThoughtsInChat) {
-                        Component msg = Component.literal("§7[" + name + " думает]: §o" + thought);
+                        Component msg = Component.literal("В§7[" + name + " РґСѓРјР°РµС‚]: В§o" + thought);
                         for (ServerPlayer p : level.players()) {
-                            if (p.distanceToSqr(villager) < 400.0) {
+                            if (p.distanceToSqr(companion) < 400.0) {
                                 p.sendSystemMessage(msg);
                             }
                         }
                     }
 
-                    // Применяем навигацию и анимацию
-                    executeAction(villager, level, state, finalNav, tgt, anim, emo);
+                    executeAction(companion, level, state, finalNav, tgt, anim, emo);
 
                 } catch (Exception e) {
-                    Notaloneanymore.LOGGER.error("Ошибка парсинга мыслей: {}", e.getMessage());
+                    Notaloneanymore.LOGGER.error("РћС€РёР±РєР° РїР°СЂСЃРёРЅРіР° РјС‹СЃР»РµР№: {}", e.getMessage());
                 }
             });
         });
     }
 
-    /**
-     * Выполняет комплексное действие: устанавливает состояния и спавнит частицы.
-     */
-    private void executeAction(Villager villager, ServerLevel level, VillagerAiState state,
-                               String nav, String targetType, String anim, String emo) {
+    private static void executeAction(CompanionEntity companion, ServerLevel level, CompanionAiState state,
+                                      String nav, String targetType, String anim, String emo) {
         state.setNavState(nav);
         state.setAnimState(anim);
         state.setActionTimer(140);
 
-        // Частицы эмоций
         if (emo.equals("happy")) {
             level.sendParticles(ParticleTypes.HAPPY_VILLAGER,
-                    villager.getX(), villager.getY() + 2, villager.getZ(), 5, 0.3, 0.3, 0.3, 0);
+                    companion.getX(), companion.getY() + 1.0, companion.getZ(), 5, 0.3, 0.3, 0.3, 0);
         } else if (emo.equals("angry")) {
             level.sendParticles(ParticleTypes.ANGRY_VILLAGER,
-                    villager.getX(), villager.getY() + 2, villager.getZ(), 4, 0.2, 0.2, 0.2, 0);
+                    companion.getX(), companion.getY() + 1.0, companion.getZ(), 4, 0.2, 0.2, 0.2, 0);
         }
 
-        // Анимации
         if (anim.equalsIgnoreCase("sleep")) {
-            villager.startSleeping(villager.blockPosition());
+            companion.startSleeping(companion.blockPosition());
         } else if (anim.equalsIgnoreCase("wake")) {
-            villager.stopSleeping();
+            companion.stopSleeping();
         } else if (anim.equalsIgnoreCase("jump")) {
-            villager.getJumpControl().jump();
-            villager.setDeltaMovement(villager.getDeltaMovement().add(0, 0.5, 0));
+            companion.getJumpControl().jump();
+            companion.setDeltaMovement(companion.getDeltaMovement().add(0, 0.5, 0));
+            companion.hurtMarked = true;
         } else if (anim.equalsIgnoreCase("work")) {
-            level.broadcastEntityEvent(villager, (byte) 15);
+            level.broadcastEntityEvent(companion, (byte) 15);
         }
 
-        // Поиск цели
         if (!targetType.equals("none")) {
             if (targetType.equals("player")) {
-                // Ищем ближайшего игрока
-                net.minecraft.world.entity.player.Player nearest = level.getNearestPlayer(villager, 12.0);
+                net.minecraft.world.entity.player.Player nearest = level.getNearestPlayer(companion, 12.0);
                 if (nearest != null) state.setTargetEntity(nearest);
             } else {
                 List<LivingEntity> targets = level.getEntitiesOfClass(
-                        LivingEntity.class, villager.getBoundingBox().inflate(12.0),
-                        e -> e != villager && (
+                        LivingEntity.class, companion.getBoundingBox().inflate(12.0),
+                        e -> e != companion && (
                                 BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getPath()
                                         .equalsIgnoreCase(targetType)
                                         || (targetType.equals("monster") && e instanceof Enemy)
                         ));
                 if (!targets.isEmpty()) {
                     state.setTargetEntity(targets.stream()
-                            .min(java.util.Comparator.comparingDouble(e -> e.distanceToSqr(villager)))
+                            .min(java.util.Comparator.comparingDouble(e -> e.distanceToSqr(companion)))
                             .get());
                 }
             }
         }
+
+        // РќР°РІРёРіР°С†РёСЋ РґРµР»РµРіРёСЂСѓРµРј РІ entity's executeComplexAction Р»РѕРіРёРєСѓ (РЅРѕ СѓРїСЂРѕС‰РµРЅРЅРѕ Р·РґРµСЃСЊ)
+        if ((nav.equals("go_to_target") || nav.equals("follow") || nav.equals("flee")) && state.getTargetEntity() != null) {
+            companion.getNavigation().moveTo(state.getTargetEntity(), nav.equals("flee") ? 0.8 : 0.5);
+        } else if (nav.equals("wander")) {
+            net.minecraft.core.BlockPos pos = companion.blockPosition().offset(companion.getRandom().nextInt(10)-5, 0, companion.getRandom().nextInt(10)-5);
+            companion.getNavigation().moveTo(pos.getX()+0.5, pos.getY(), pos.getZ()+0.5, 0.5);
+        } else if (nav.equals("none")) {
+            companion.getNavigation().stop();
+        }
     }
 
-    /**
-     * Нормализует строку навигации из JSON.
-     */
     public static String normalizeNav(String nav) {
         nav = nav.trim().toLowerCase().replace("\"", "").replace("'", "");
         if (nav.contains("wander")) return "wander";
@@ -290,14 +244,5 @@ public class AutonomousThoughtTask extends ExtendedBehaviour<Villager> {
         if (nav.contains("go_to_target")) return "go_to_target";
         return "none";
     }
-
-    @Override
-    protected boolean canStillUse(ServerLevel level, Villager villager, long gameTime) {
-        return true; // Не останавливается
-    }
-
-    @Override
-    public Set<net.minecraft.world.entity.ai.behavior.declarative.MemoryCondition<?, ?>> getMemoryRequirements() {
-        return Set.of(); // Не используем vanilla memory system
-    }
 }
+

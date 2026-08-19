@@ -4,12 +4,12 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.nadaess.notaloneanymore.DeepSeekClient;
 import com.nadaess.notaloneanymore.Notaloneanymore;
-import com.nadaess.notaloneanymore.util.DialogAgent;
+import com.nadaess.notaloneanymore.entity.CompanionAgent;
+import com.nadaess.notaloneanymore.entity.CompanionEntity;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.PlayerChatMessage;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import org.spongepowered.asm.mixin.Mixin;
@@ -42,16 +42,14 @@ public abstract class ServerChatMixin {
 
         double radius = 12.0;
         AABB area = player.getBoundingBox().inflate(radius);
-        List<Villager> villagers = world.getEntitiesOfClass(Villager.class, area);
+        List<CompanionEntity> companions = world.getEntitiesOfClass(CompanionEntity.class, area);
 
-        if (!villagers.isEmpty()) {
-            Villager closestVillager = villagers.stream()
+        if (!companions.isEmpty()) {
+            CompanionEntity closest = companions.stream()
                     .min(Comparator.comparingDouble(v -> v.distanceToSqr(player)))
                     .get();
 
-            if (closestVillager instanceof DialogAgent agent) {
-                agent.notAlone$startDialog(player.getUUID());
-            }
+            closest.companion$startDialog(player.getUUID());
 
             boolean isFirstMessage = !messageBuffers.containsKey(playerUuid) || messageBuffers.get(playerUuid).length() == 0;
 
@@ -70,7 +68,7 @@ public abstract class ServerChatMixin {
                 buffer.setLength(0);
 
                 ((ServerLevel) world).getServer().execute(() ->
-                        processAiTalk(player, closestVillager, world, fullUserText)
+                        processAiTalk(player, closest, world, fullUserText)
                 );
 
             }, delayMs, TimeUnit.MILLISECONDS);
@@ -80,34 +78,29 @@ public abstract class ServerChatMixin {
     }
 
     @Unique
-    private void processAiTalk(ServerPlayer player, Villager closestVillager, Level world, String fullText) {
-        String professionKey = net.minecraft.core.registries.BuiltInRegistries.VILLAGER_PROFESSION.getKey(closestVillager.getVillagerData().profession().value()).getPath();
-        String villagerName = closestVillager.hasCustomName() ? closestVillager.getCustomName().getString() : "Житель";
+    private void processAiTalk(ServerPlayer player, CompanionEntity closest, Level world, String fullText) {
+        String displayName = closest.hasCustomName() ? closest.getCustomName().getString() : "Компаньон";
+        String role = "companion";
 
-        String biome = world.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.BIOME).getKey(world.getBiome(closestVillager.blockPosition()).value()).getPath();
+        String biome = world.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.BIOME).getKey(world.getBiome(closest.blockPosition()).value()).getPath();
         String weather = world.isThundering() ? "гроза" : (world.isRaining() ? "дождь" : "ясно");
 
         long gameTime = world.getLevelData().getGameTime() % 24000;
         String timeString = (gameTime >= 13000) ? "ночь" : "день";
 
-        String chatHistory = "Разговор начат.";
-        String longTermMemory = "Ничего.";
+        String chatHistory = closest.companion$getChatHistoryForPrompt();
+        String longTermMemory = closest.companion$getLongTermMemory();
+        closest.companion$addMessageToHistory("Игрок " + player.getName().getString(), fullText);
+
         StringBuilder genomePrompt = new StringBuilder();
         StringBuilder needsPrompt = new StringBuilder();
+        closest.companion$getGenome().forEach((g, v) -> genomePrompt.append(g).append(": ").append(v).append("/100, "));
+        closest.companion$getNeeds().forEach((n, v) -> needsPrompt.append(n).append(": ").append(v).append("/100, "));
 
-        if (closestVillager instanceof DialogAgent agent) {
-            chatHistory = agent.notAlone$getChatHistoryForPrompt();
-            longTermMemory = agent.notAlone$getLongTermMemory();
-            agent.notAlone$addMessageToHistory("Игрок " + player.getName().getString(), fullText);
-
-            agent.notAlone$getGenome().forEach((g, v) -> genomePrompt.append(g).append(": ").append(v).append("/100, "));
-            agent.notAlone$getNeeds().forEach((n, v) -> needsPrompt.append(n).append(": ").append(v).append("/100, "));
-        }
-
-        player.sendSystemMessage(Component.literal("§7[" + villagerName + " обдумывает твои слова... ]"));
+        player.sendSystemMessage(Component.literal("§7[" + displayName + " обдумывает твои слова... ]"));
 
         String systemPrompt = String.format(
-                "Ты - разумный Житель в мире Minecraft по имени %s (%s).\n" +
+                "Ты - разумный Компаньон в мире Minecraft по имени %s (%s).\n" +
                         "Окружение: биом %s, %s, погода %s.\n" +
                         "ТВОЙ ПСИХОЛОГИЧЕСКИЙ ГЕНОМ: %s\n" +
                         "ТВОИ ТЕКУЩИЕ ПОТРЕБНОСТИ: %s\n" +
@@ -123,7 +116,7 @@ public abstract class ServerChatMixin {
                         "  \"emotion\": \"neutral/happy/sad/angry\",\n" +
                         "  \"new_fact\": \"Дополни или перепиши долгосрочную память\"\n" +
                         "}",
-                villagerName, professionKey, biome, timeString, weather, genomePrompt.toString(), needsPrompt.toString(), longTermMemory, chatHistory, fullText
+                displayName, role, biome, timeString, weather, genomePrompt.toString(), needsPrompt.toString(), longTermMemory, chatHistory, fullText
         );
 
         DeepSeekClient.askAI(systemPrompt, fullText).thenAccept(response -> {
@@ -137,19 +130,17 @@ public abstract class ServerChatMixin {
                 if (json.has("say_to_player")) {
                     String cleanThought = json.get("say_to_player").getAsString();
 
-                    if (closestVillager instanceof DialogAgent agent) {
-                        agent.notAlone$addMessageToHistory("Ты (" + villagerName + ")", cleanThought);
-                    }
+                    closest.companion$addMessageToHistory("Ты (" + displayName + ")", cleanThought);
 
-                    player.sendSystemMessage(Component.literal("§e[" + villagerName + " (" + professionKey + ")] §f" + cleanThought));
+                    player.sendSystemMessage(Component.literal("§e[" + displayName + "] §f" + cleanThought));
 
                     String nav = json.has("navigation") ? json.get("navigation").getAsString() : "none";
                     String tgt = json.has("target") ? json.get("target").getAsString() : "none";
                     String anim = json.has("animation") ? json.get("animation").getAsString() : "none";
                     String emo = json.has("emotion") ? json.get("emotion").getAsString() : "neutral";
 
-                    if (json.has("new_fact") && closestVillager instanceof DialogAgent agent) {
-                        agent.notAlone$updateLongTermMemory(json.get("new_fact").getAsString());
+                    if (json.has("new_fact")) {
+                        closest.companion$updateLongTermMemory(json.get("new_fact").getAsString());
                     }
 
                     nav = nav.trim().toLowerCase().replace("\"", "").replace("'", "");
@@ -162,9 +153,7 @@ public abstract class ServerChatMixin {
                     else nav = "none";
 
                     String finalNav = nav;
-                    if (closestVillager instanceof DialogAgent agent) {
-                        player.level().getServer().execute(() -> agent.notAlone$executeComplexAction(finalNav, tgt, anim, emo, player));
-                    }
+                    player.level().getServer().execute(() -> closest.companion$executeComplexAction(finalNav, tgt, anim, emo, player));
                 }
             } catch (Exception e) {
                 Notaloneanymore.LOGGER.error("Ошибка парсинга чата: {}", e.getMessage());

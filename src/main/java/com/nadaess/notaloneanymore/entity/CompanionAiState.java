@@ -1,18 +1,17 @@
-package com.nadaess.notaloneanymore.ai.state;
+package com.nadaess.notaloneanymore.entity;
 
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.npc.villager.Villager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
 /**
- * Выделенный слой данных состояния ИИ жителя.
- * Содержит геном, потребности, память, состояния навигации/анимации,
- * историю диалога и таймеры.
+ * Выделенный слой данных состояния ИИ компаньона.
+ * Полная копия VillagerAiState с очисткой от Villager-специфики.
+ * Главные идеи сохранены: геном 15 статов, 4 потребности, трёхуровневая память, инерция.
  */
-public class VillagerAiState {
+public class CompanionAiState {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("notaloneanymore");
 
@@ -27,8 +26,8 @@ public class VillagerAiState {
     private String animState = "none";
     private LivingEntity targetEntity = null;
 
-    // ===== Инфраструктура очереди Voyager-лайк действий =====
-    private final java.util.Queue<com.nadaess.notaloneanymore.ai.brain.tasks.AtomicAction> actionQueue = new java.util.LinkedList<>();
+    // ===== Очередь атомарных действий (Voyager-лайк) =====
+    private final Queue<com.nadaess.notaloneanymore.ai.brain.tasks.AtomicAction> actionQueue = new LinkedList<>();
     private boolean actionInitialized = false;
     private int actionTimer = 0;
 
@@ -46,22 +45,21 @@ public class VillagerAiState {
     private final Map<String, Integer> genome = new HashMap<>();
     private final Map<String, Integer> needs = new HashMap<>();
 
-    // ===== Новые поля для технических задач =====
+    // ===== Технические поля =====
     private net.minecraft.core.BlockPos targetPos = null;
     private String currentAction = "none";
     private net.minecraft.world.level.block.state.BlockState targetBlockState = null;
 
-    // ===== Флаг инициализации =====
     private boolean initialized = false;
 
     /**
-     * Инициализация генома и потребностей жителя на основе UUID.
+     * Инициализация генома и потребностей на основе UUID.
      */
-    public void initDefaultStats(Villager villager) {
+    public void initDefaultStats(CompanionEntity entity) {
         if (initialized) return;
         initialized = true;
 
-        Random rng = new Random(villager.getUUID().getMostSignificantBits());
+        Random rng = new Random(entity.getUUID().getMostSignificantBits());
 
         String[] genes = {"moral", "empathy", "stubborn", "aggression", "industry", "greed",
                 "extraversion", "bravery", "curiosity", "intellect", "paranoia",
@@ -75,13 +73,12 @@ public class VillagerAiState {
         needs.putIfAbsent("social", 50 + rng.nextInt(30));
         needs.putIfAbsent("finance", 20 + rng.nextInt(40));
 
-        LOGGER.info("[ИИ ЛОГ] Сгенерирован научный геном для жителя {} ({})",
-                villager.getName().getString(), villager.getUUID());
+        // Роль/архетип из all-ideas: позже заменится на выбор скиллов Hermes-style
+        LOGGER.info("[ИИ] Сгенерирован геном для компаньона {} ({})", entity.getName().getString(), entity.getUUID());
     }
 
     /**
-     * Тик физиологических потребностей (голод, усталость, социализация).
-     * Вызывается раз в 1200 тиков (1 минута).
+     * Тик потребностей — раз в 1200 тиков (1 минута).
      */
     public void tickNeeds() {
         needs.put("hunger", Math.min(100, needs.get("hunger") + 2));
@@ -89,9 +86,7 @@ public class VillagerAiState {
         needs.put("social", Math.max(0, needs.get("social") - 3));
     }
 
-    // ========================================================================
-    // DialogAgent — делегируемые методы
-    // ========================================================================
+    // Dialog logic
 
     public int startDialog(UUID playerUuid) {
         this.dialogTargetUuid = playerUuid;
@@ -145,8 +140,7 @@ public class VillagerAiState {
     public int getActionTimer() { return actionTimer; }
     public void setActionTimer(int ticks) { this.actionTimer = ticks; }
 
-    // ===== Методы для работы с очередью действий =====
-    public java.util.Queue<com.nadaess.notaloneanymore.ai.brain.tasks.AtomicAction> getActionQueue() {
+    public Queue<com.nadaess.notaloneanymore.ai.brain.tasks.AtomicAction> getActionQueue() {
         return this.actionQueue;
     }
 
@@ -168,7 +162,6 @@ public class VillagerAiState {
     public boolean isInitialized() { return initialized; }
     public void setInitialized(boolean value) { this.initialized = value; }
 
-    // ===== Геттеры/сеттеры для технических задач =====
     public net.minecraft.core.BlockPos getTargetPos() { return this.targetPos; }
     public void setTargetPos(net.minecraft.core.BlockPos pos) { this.targetPos = pos; }
 
@@ -178,9 +171,6 @@ public class VillagerAiState {
     public net.minecraft.world.level.block.state.BlockState getTargetBlockState() { return this.targetBlockState; }
     public void setTargetBlockState(net.minecraft.world.level.block.state.BlockState state) { this.targetBlockState = state; }
 
-    /**
-     * Получение имени цели для отладки.
-     */
     public String getTargetName() {
         return this.targetEntity != null
                 ? net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE
@@ -188,9 +178,7 @@ public class VillagerAiState {
                 : "none";
     }
 
-    // ========================================================================
-    // NBT — сохранение и загрузка
-    // ========================================================================
+    // NBT
 
     public void saveToNbt(net.minecraft.world.level.storage.ValueOutput output) {
         output.putString("RamMemory", this.ramMemory);
@@ -202,6 +190,17 @@ public class VillagerAiState {
 
         for (Map.Entry<String, Integer> entry : needs.entrySet())
             output.putInt("Need_" + entry.getKey(), entry.getValue());
+
+        output.putInt("DialogTicksLeft", this.dialogTicksLeft);
+        output.putInt("MaxDialogSeconds", this.currentMaxDialogSeconds);
+        output.putBoolean("InConversation", this.isInActiveConversation);
+        if (this.dialogTargetUuid != null) {
+            output.putString("DialogTarget", this.dialogTargetUuid.toString());
+        }
+        output.putInt("AutonomousCooldown", this.autonomousCooldown);
+        output.putInt("ReactiveCooldown", this.reactiveCooldown);
+        output.putString("NavState", this.navState);
+        output.putString("AnimState", this.animState);
     }
 
     public void loadFromNbt(net.minecraft.world.level.storage.ValueInput input) {
@@ -222,6 +221,17 @@ public class VillagerAiState {
             final String needKey = n;
             input.getInt("Need_" + n).ifPresent(val -> needs.put(needKey, val));
         }
+
+        input.getInt("DialogTicksLeft").ifPresent(v -> this.dialogTicksLeft = v);
+        input.getInt("MaxDialogSeconds").ifPresent(v -> this.currentMaxDialogSeconds = v);
+        this.isInActiveConversation = input.getBooleanOr("InConversation", false);
+        input.getString("DialogTarget").ifPresent(s -> {
+            try { this.dialogTargetUuid = UUID.fromString(s); } catch (Exception ignored) {}
+        });
+        input.getInt("AutonomousCooldown").ifPresent(v -> this.autonomousCooldown = v);
+        input.getInt("ReactiveCooldown").ifPresent(v -> this.reactiveCooldown = v);
+        input.getString("NavState").ifPresent(v -> this.navState = v);
+        input.getString("AnimState").ifPresent(v -> this.animState = v);
 
         this.initialized = true;
     }

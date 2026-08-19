@@ -3,13 +3,13 @@
 	"id": "notaloneanymore",
 	"version": "${version}",
 	"name": "NotAloneAnymore",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"description": "Custom AI companion entity (TNT cube placeholder) with LLM-driven personality, memory and needs. Replaces vanilla villagers.",
 	"authors": [
-		"Me!"
+		"Nadaess"
 	],
 	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
+		"homepage": "https://github.com/nadaess/notaloneanymore",
+		"sources": "https://github.com/nadaess/notaloneanymore"
 	},
 	"license": "AGPL-3.0-only",
 	"icon": "assets/notaloneanymore/icon.png",
@@ -17,6 +17,9 @@
 	"entrypoints": {
 		"main": [
 			"com.nadaess.notaloneanymore.Notaloneanymore"
+		],
+		"client": [
+			"com.nadaess.notaloneanymore.client.NotAloneClient"
 		]
 	},
 	"mixins": [

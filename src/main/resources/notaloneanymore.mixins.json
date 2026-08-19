@@ -3,8 +3,7 @@
 	"package": "com.nadaess.notaloneanymore.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
-		"ServerChatMixin",
-		"VillagerMixin"
+		"ServerChatMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
